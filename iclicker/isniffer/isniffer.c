@@ -30,6 +30,12 @@ __bit sleepy;
 static volatile u8 rxdone = 0;
 __xdata DMA_DESC dmaConfig;
 u16 pktcount = 0;
+u16 count_a = 0;
+u16 count_b = 0;
+u16 count_c = 0;
+u16 count_d = 0;
+u16 count_e = 0;
+u16 count_err = 0;
 
 //#define NUM_CLICKERS 100
 //xdata clicker clicker_table[NUM_CLICKERS];
@@ -147,20 +153,8 @@ void poll_keyboard() {
 
 void main(void) {
 	u16 i;
-	u8 button;
-	u32 id;
-	// just counting all packets for now
-	u16 count_a = 0;
-	u16 count_b = 0;
-	u16 count_c = 0;
-	u16 count_d = 0;
-	u16 count_e = 0;
-	u16 count_err = 0;
-    u16 csum = 0;
-
 reset:
 	sleepy = 0;
-
 	xtalClock();
 	setIOPorts();
 	configureSPI();
@@ -169,6 +163,13 @@ reset:
 	tune("AA");
 	setup_dma_rx();
 	clear();
+    count_a = 0;
+    count_b = 0;
+    count_c = 0;
+    count_d = 0;
+    count_e = 0;
+    count_err = 0;
+    pktcount=0;
 
 	SSN = LOW;
 	setCursor(0, 0);
@@ -181,64 +182,16 @@ reset:
 		RFIM = RFIM_IM_DONE; // mask IRQ_DONE only
 		DMAARM |= DMAARM0;  // Arm DMA channel 0
     	RFST = RFST_SRX;;
-
+        // rxdone is set by the ISR which decodes packets
+        // previously it was done here but was worried about missing packets
+        // during display routines.
 		if (rxdone)
         {
 		    rxdone = 0;
-		    pktcount++;
-    	    RFST = RFST_SIDLE;
-		    button = rxbuf[4]&0xf;
-            csum = (rxbuf[1] + rxbuf[2]+rxbuf[3]+rxbuf[4]);
-            
-		    if (rxbuf[5]!=(csum&0xff))
-            {
-                count_err+=1;
-            }
-		/*
-		if ((button != BUTTON_A)
-				&& (button != BUTTON_B)
-				&& (button != BUTTON_C)
-				&& (button != BUTTON_D)
-				&& (button != BUTTON_E))
-			continue;
-			*/
-
-		/*
-		 * What I'm calling an "id" is the entire portion of the packet that is
-		 * common to every packet transmitted by a particular iclicker.  It is
-		 * probably the hexadecimal ID printed on the back of the unit encoded
-		 * somehow.
-		 *
-		 * hmmm, one off from byte boundaries - probably wrong
-		 */
-		//id = ((u32)rxbuf[1] << 23) | ((u32)rxbuf[2] << 15)
-				//| ((u32)rxbuf[3] << 7) | ((u32)rxbuf[4] >> 1);
-
-		/*
-		 * we should be only counting one answer for each id, but for now we
-		 * just count every packet
-		 */
-
-		    switch (button) {
-		    case BUTTON_A:
-			    count_a++;
-			    break;
-		    case BUTTON_B:
-			    count_b++;
-			    break;
-		    case BUTTON_C:
-			    count_c++;
-			    break;
-		    case BUTTON_D:
-			    count_d++;
-			    break;
-		    case BUTTON_E:
-			    count_e++;
-			    break;
-		    default:
-			    break;
-		    }
-
+            /*
+             * we should be only counting one answer for each id, but for now we
+             * just count every packet
+             */
 		    SSN = LOW;
 		    setCursor(1, 0);
 		    printf("err: %d", count_err);
@@ -261,6 +214,7 @@ reset:
 		/* go to sleep (more or less a shutdown) if power button pressed */
 		if (sleepy) {
 			clear();
+            RFST = RFST_SIDLE;
 			sleepMillis(1000);
 			SSN = LOW;
 			LCDPowerSave();
@@ -283,12 +237,46 @@ reset:
 		}
 	}
 }
+void parse_pkt()
+{
+    u16 csum;
+    u8 button;
+    pktcount++;
+    button = rxbuf[4]&0xf;
+    csum = (rxbuf[1] + rxbuf[2]+rxbuf[3]+rxbuf[4]);
+
+    if (rxbuf[5]!=(csum&0xff))
+    {
+        count_err++;
+        return;
+    }
+    switch (button) {
+        case BUTTON_A:
+            count_a++;
+            break;
+        case BUTTON_B:
+            count_b++;
+            break;
+        case BUTTON_C:
+            count_c++;
+            break;
+        case BUTTON_D:
+            count_d++;
+            break;
+        case BUTTON_E:
+            count_e++;
+            break;
+        default:
+            break;
+    }
+}
 
 /* IRQ_DONE interrupt service routine */
 void rf_isr() __interrupt (RF_VECTOR) {
 	/* clear the interrupt flags */
 	RFIF &= ~RFIF_IRQ_DONE;
 	S1CON &= ~0x03;           // Clear the general RFIF interrupt registers
-
+    parse_pkt();
+    RFST = RFST_SRX;
 	rxdone = 1;
 }
