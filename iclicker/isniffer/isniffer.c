@@ -34,7 +34,7 @@ u16 pktcount = 0;
 //#define NUM_CLICKERS 100
 //xdata clicker clicker_table[NUM_CLICKERS];
 
-#define LEN 9
+#define LEN 6
 __xdata u8 rxbuf[LEN];
 
 void setup_dma_rx()
@@ -68,23 +68,27 @@ void radio_setup() {
 	FREQ1     = 0xD3;
 	FREQ0     = 0xAC;
     CHANNR    = 0x00;
+    /* 917.0 MHz */
+	//FREQ2     = 0x23;
+	//FREQ1     = 0x44;
+	//FREQ0     = 0xec;
 
 	/* maximum channel bandwidth (812.5 kHz), 152.34 kbaud */
     MDMCFG4   = 0x1C;
     MDMCFG3   = 0x80;
 
 	/* DC blocking enabled, 2-FSK */
-	//MDMCFG2   = 0x0l; // 15/16 bit sync
-	MDMCFG2   = 0x02; // 16/16 bit sync
+	MDMCFG2   = 0x01; // 15/16 bit sync
+	//MDMCFG2   = 0x02; // 16/16 bit sync
 
 	/* no FEC, 2 byte preamble, 250 kHz channel spacing */
     MDMCFG1   = 0x03;
     MDMCFG0   = 0x3B;
-
+	
 	/* 228.5 kHz frequency deviation */
-    //DEVIATN   = 0x71;
+    DEVIATN   = 0x71;
 	/* 253.9 kHz frequency deviation */
-    DEVIATN   = 0x72;
+    //DEVIATN   = 0x72;
 
     FREND1    = 0x56;   // Front end RX configuration.
     FREND0    = 0x10;   // Front end RX configuration.
@@ -92,7 +96,7 @@ void radio_setup() {
 	/* automatic frequency calibration */
     MCSM0     = 0x14;
 	MCSM1     = 0x30; // TXOFF_MODE = IDLE
-
+    BSCFG     = 0x6d;   // Bit Sync
     FSCAL3    = 0xE9;   // Frequency synthesizer calibration.
     FSCAL2    = 0x2A;   // Frequency synthesizer calibration.
     FSCAL1    = 0x00;   // Frequency synthesizer calibration.
@@ -106,17 +110,17 @@ void radio_setup() {
     //PKTCTRL1  = 0x00;
     //PKTCTRL1  = 0x84;
 	/* preamble quality check 2*4=6, address check, append status */
-    PKTCTRL1  = 0x45;
-
+    //PKTCTRL1  = 0x45;
+    PKTCTRL1  = 0x01;
 	/* no whitening, no CRC, fixed packet length */
     PKTCTRL0  = 0x00;
 
 	/* packet length in bytes */
     PKTLEN    = LEN;
 
-    SYNC1     = 0xB0;
-    SYNC0     = 0xB0;
-    ADDR      = 0xB0;
+    SYNC1     = 0x85;
+    SYNC0     = 0x85;
+    ADDR      = 0x85;
 }
 
 /* tune the radio to a particular channel */
@@ -151,6 +155,8 @@ void main(void) {
 	u16 count_c = 0;
 	u16 count_d = 0;
 	u16 count_e = 0;
+	u16 count_err = 0;
+    u16 csum = 0;
 
 reset:
 	sleepy = 0;
@@ -176,12 +182,18 @@ reset:
 		DMAARM |= DMAARM0;  // Arm DMA channel 0
     	RFST = RFST_SRX;;
 
-		while (!rxdone);
-		rxdone = 0;
-		pktcount++;
-    	RFST = RFST_SIDLE;
-
-		button = ((rxbuf[4] & 1) << 3) | (rxbuf[5] >> 5);
+		if (rxdone)
+        {
+		    rxdone = 0;
+		    pktcount++;
+    	    RFST = RFST_SIDLE;
+		    button = rxbuf[4]&0xf;
+            csum = (rxbuf[1] + rxbuf[2]+rxbuf[3]+rxbuf[4]);
+            
+		    if (rxbuf[5]!=(csum&0xff))
+            {
+                count_err+=1;
+            }
 		/*
 		if ((button != BUTTON_A)
 				&& (button != BUTTON_B)
@@ -207,43 +219,43 @@ reset:
 		 * just count every packet
 		 */
 
-		switch (button) {
-		case BUTTON_A:
-			count_a++;
-			break;
-		case BUTTON_B:
-			count_b++;
-			break;
-		case BUTTON_C:
-			count_c++;
-			break;
-		case BUTTON_D:
-			count_d++;
-			break;
-		case BUTTON_E:
-			count_e++;
-			break;
-		default:
-			break;
-		}
+		    switch (button) {
+		    case BUTTON_A:
+			    count_a++;
+			    break;
+		    case BUTTON_B:
+			    count_b++;
+			    break;
+		    case BUTTON_C:
+			    count_c++;
+			    break;
+		    case BUTTON_D:
+			    count_d++;
+			    break;
+		    case BUTTON_E:
+			    count_e++;
+			    break;
+		    default:
+			    break;
+		    }
 
-		SSN = LOW;
-		setCursor(2, 0);
-		printf("A: %d", count_a);
-		setCursor(3, 0);
-		printf("B: %d", count_b);
-		setCursor(4, 0);
-		printf("C: %d", count_c);
-		setCursor(5, 0);
-		printf("D: %d", count_d);
-		setCursor(6, 0);
-		printf("E: %d", count_e);
-		setCursor(7, 0);
-		printf("total packets: %d", pktcount);
-		SSN = HIGH;
-	}
-
-	while (1) {
+		    SSN = LOW;
+		    setCursor(1, 0);
+		    printf("err: %d", count_err);
+		    setCursor(2, 0);
+		    printf("A: %d", count_a);
+		    setCursor(3, 0);
+		    printf("B: %d", count_b);
+		    setCursor(4, 0);
+		    printf("C: %d", count_c);
+		    setCursor(5, 0);
+		    printf("D: %d", count_d);
+		    setCursor(6, 0);
+		    printf("E: %d", count_e);
+		    setCursor(7, 0);
+		    printf("total packets: %d", pktcount);
+		    SSN = HIGH;
+	    }
 		poll_keyboard();
 
 		/* go to sleep (more or less a shutdown) if power button pressed */
