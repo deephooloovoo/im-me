@@ -41,6 +41,10 @@
 #define BUTTON_E  0xA
 #define JOIN_CHAN 0x2
 
+#define INP_NORMAL 0x0
+#define INP_CH0 0x1
+#define INP_CH1 0x2
+
 typedef struct {
 	u32 id;
 	u8 button;
