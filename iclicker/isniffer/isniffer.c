@@ -31,7 +31,8 @@ static volatile u8 lcdupdate = 0;
 static volatile u8 rf_mode_tx = 0;
 static volatile u8 rfdone = 0;
 static volatile u8 channame[2];
-__xdata DMA_DESC dmaConfig;
+__xdata DMA_DESC dmaConfig_rx;
+__xdata DMA_DESC dmaConfig_tx;
 
 static volatile u8 input_state = INP_NORMAL;
 
@@ -54,42 +55,42 @@ __xdata u8 txbuf[LEN];
 
 void setup_dma_tx()
 {
-	dmaConfig.PRIORITY       = 2;  // high priority
-	dmaConfig.M8             = 0;  // not applicable
-	dmaConfig.IRQMASK        = 0;  // disable interrupts
-	dmaConfig.TRIG           = 19; // radio
-	dmaConfig.TMODE          = 2;  // single byte mode
-	dmaConfig.WORDSIZE       = 0;  // one byte words;
-	dmaConfig.VLEN           = 0;  // use LEN
-	SET_WORD(dmaConfig.LENH, dmaConfig.LENL, LEN);
+	dmaConfig_tx.PRIORITY       = 2;  // high priority
+	dmaConfig_tx.M8             = 0;  // not applicable
+	dmaConfig_tx.IRQMASK        = 0;  // disable interrupts
+	dmaConfig_tx.TRIG           = 19; // radio
+	dmaConfig_tx.TMODE          = 2;  // single byte mode
+	dmaConfig_tx.WORDSIZE       = 0;  // one byte words;
+	dmaConfig_tx.VLEN           = 0;  // use LEN
+	SET_WORD(dmaConfig_tx.LENH, dmaConfig_tx.LENL, LEN);
 
-	SET_WORD(dmaConfig.SRCADDRH, dmaConfig.SRCADDRL, txbuf);
-	SET_WORD(dmaConfig.DESTADDRH, dmaConfig.DESTADDRL, &X_RFD);
-	dmaConfig.SRCINC         = 1;  // increment by one
-	dmaConfig.DESTINC        = 0;  // do not increment
+	SET_WORD(dmaConfig_tx.SRCADDRH, dmaConfig_tx.SRCADDRL, txbuf);
+	SET_WORD(dmaConfig_tx.DESTADDRH, dmaConfig_tx.DESTADDRL, &X_RFD);
+	dmaConfig_tx.SRCINC         = 1;  // increment by one
+	dmaConfig_tx.DESTINC        = 0;  // do not increment
 
-	SET_WORD(DMA0CFGH, DMA0CFGL, &dmaConfig);
+	SET_WORD(DMA1CFGH, DMA1CFGL, &dmaConfig_tx);
 
 	return;
 }
 
 void setup_dma_rx()
 {
-	dmaConfig.PRIORITY       = 2;  // high priority
-	dmaConfig.M8             = 0;  // not applicable
-	dmaConfig.IRQMASK        = 0;  // disable interrupts
-	dmaConfig.TRIG           = 19; // radio
-	dmaConfig.TMODE          = 0;  // single byte mode
-	dmaConfig.WORDSIZE       = 0;  // one byte words;
-	dmaConfig.VLEN           = 0;  // use LEN
-	SET_WORD(dmaConfig.LENH, dmaConfig.LENL, LEN);
+	dmaConfig_rx.PRIORITY       = 2;  // high priority
+	dmaConfig_rx.M8             = 0;  // not applicable
+	dmaConfig_rx.IRQMASK        = 0;  // disable interrupts
+	dmaConfig_rx.TRIG           = 19; // radio
+	dmaConfig_rx.TMODE          = 0;  // single byte mode
+	dmaConfig_rx.WORDSIZE       = 0;  // one byte words;
+	dmaConfig_rx.VLEN           = 0;  // use LEN
+	SET_WORD(dmaConfig_rx.LENH, dmaConfig_rx.LENL, LEN);
 
-	SET_WORD(dmaConfig.SRCADDRH, dmaConfig.SRCADDRL, &X_RFD);
-	SET_WORD(dmaConfig.DESTADDRH, dmaConfig.DESTADDRL, rxbuf);
-	dmaConfig.SRCINC         = 0;  // do not increment
-	dmaConfig.DESTINC        = 1;  // increment by one
+	SET_WORD(dmaConfig_rx.SRCADDRH, dmaConfig_rx.SRCADDRL, &X_RFD);
+	SET_WORD(dmaConfig_rx.DESTADDRH, dmaConfig_rx.DESTADDRL, rxbuf);
+	dmaConfig_rx.SRCINC         = 0;  // do not increment
+	dmaConfig_rx.DESTINC        = 1;  // increment by one
 
-	SET_WORD(DMA0CFGH, DMA0CFGL, &dmaConfig);
+	SET_WORD(DMA0CFGH, DMA0CFGL, &dmaConfig_rx);
 
 	return;
 }
@@ -118,7 +119,7 @@ void radio_setup() {
 	//MDMCFG2   = 0x02; // 16/16 bit sync
 
 	/* no FEC, 2 byte preamble, 250 kHz channel spacing */
-    MDMCFG1   = 0x03;
+    MDMCFG1   = 0x43;
     MDMCFG0   = 0x3B;
 	
 	/* 228.5 kHz frequency deviation */
@@ -171,8 +172,7 @@ void tune(char *channame) {
 void send_pkt(u8 choice)
 {
     u16 csum;
-	DMAARM &= ~DMAARM0;  // Arm DMA channel 0
-    setup_dma_tx();
+	DMAARM = DMAARM_ABORT | DMAARM0;  // Arm DMA channel 0
     RFST = RFST_SIDLE;
     txbuf[0] = 0x85;
     txbuf[1] = 0x0c;
@@ -202,16 +202,17 @@ void send_pkt(u8 choice)
     rf_mode_tx = 1;
     IEN2 |= IEN2_RFIE;
     RFIM=RFIM_IM_DONE;
+	DMAARM |= DMAARM1;  // Arm DMA channel 1
     RFST = RFST_STX;
-	DMAARM |= DMAARM0;  // Arm DMA channel 0
+    rfdone = 0;
     while (!rfdone) {};
     rfdone = 0;
-    RFST = RFST_SIDLE;
-    setup_dma_rx();
     rf_mode_tx = 0;
+	//DMAARM = DMAARM_ABORT | DMAARM1;  // Arm DMA channel 0
     IEN2 |= IEN2_RFIE;
     RFIM=RFIM_IM_DONE;
     RFST = RFST_SRX;
+	//DMAARM ^= ~DMAARM1;  // Arm DMA channel 0
 	DMAARM |= DMAARM0;  // Arm DMA channel 0
     
     
@@ -298,6 +299,7 @@ reset:
 	radio_setup();
 	tune("AA");
 	setup_dma_rx();
+	setup_dma_tx();
 	clear();
     count_a = 0;
     count_b = 0;
